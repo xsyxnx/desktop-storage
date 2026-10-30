@@ -49,6 +49,7 @@
      - 磁盘例行巡检推荐基线：每周一次 SMART 短自检（如周三 03:00）、每月一次 ZFS Scrub（如每月第一个周日 03:00）、每月一次 SMART 长自检（如每月 15 日 02:00，与 Scrub 错开半月），通过 `zed` 与 `smartd` 钩子将异常告警推送给两位管理员。
 2. **目录权限矩阵与设计原理**：
    - `/srv/storage/games/public` (`root:root 1777`)：最高位 `1` 为粘滞位（Sticky Bit，与 `/tmp` 同理），允许所有人在公共根下创建自己的目录/文件，但**只能删除或改名自己名下的条目**，防止误删他人文件。
+   - `/srv/storage/games/public/scratch` (`root:root 1777`, `30d` TTL)：临时大文件空投区，由 `storage-scratch-clean.timer` 调用原生 `systemd-tmpfiles --clean` 每日清理超过 30 天未访问的文件，防止公共区堆积无人认领的陈年垃圾。
    - `/srv/storage/games/public/{xsy,shj,ly}` (`本人:组 0755`，文件 `0644`)：本人可读写，其他室友只读浏览与下载，不能覆盖。
    - `/srv/storage/games/private` (`root:root 0711`)：`others` 仅有执行（穿过）位 `--x` 而无读取位 `r--`。任何人执行 `ls /srv/storage/games/private` 都会收到 `Permission denied`（无法窥探有哪些私人目录），但知道自己名字的用户可直接穿过该目录进入 `/srv/storage/games/private/<自己的用户名>`。
    - `/srv/storage/games/private/{xsy,shj,ly}` (`本人:组 0700`)：仅本人可读写访问，共享组与其他用户完全不可见。

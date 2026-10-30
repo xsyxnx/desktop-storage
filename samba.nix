@@ -12,6 +12,25 @@ let
     media
     sync
   ];
+  storageTmpfilesConf = pkgs.writeText "storage-directories.conf" (
+    lib.concatStringsSep "\n" (
+      [
+        "d ${games}/public 1777 root root -"
+        "d ${games}/public/scratch 1777 root root 30d"
+        "d ${games}/public/xsy 0755 xsy users -"
+        "d ${games}/private 0711 root root -"
+        "d ${games}/private/xsy 0700 xsy users -"
+        "d ${media} 0700 xsy users -"
+        "d ${sync}/data 2770 storage-sync roommates -"
+        "d ${sync}/state 0700 storage-sync storage-sync -"
+      ]
+      ++ lib.concatMap (name: [
+        "d ${games}/public/${name} 0755 ${name} roommates -"
+        "d ${games}/private/${name} 0700 ${name} roommates -"
+      ]) roommates
+    )
+    + "\n"
+  );
   masks = file: directory: {
     "create mask" = file;
     "force create mode" = file;
@@ -46,26 +65,26 @@ in
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecStart = "${pkgs.systemd}/bin/systemd-tmpfiles --create ${
-        pkgs.writeText "storage-directories.conf" (
-          lib.concatStringsSep "\n" (
-            [
-              "d ${games}/public 1777 root root -"
-              "d ${games}/public/xsy 0755 xsy users -"
-              "d ${games}/private 0711 root root -"
-              "d ${games}/private/xsy 0700 xsy users -"
-              "d ${media} 0700 xsy users -"
-              "d ${sync}/data 2770 storage-sync roommates -"
-              "d ${sync}/state 0700 storage-sync storage-sync -"
-            ]
-            ++ lib.concatMap (name: [
-              "d ${games}/public/${name} 0755 ${name} roommates -"
-              "d ${games}/private/${name} 0700 ${name} roommates -"
-            ]) roommates
-          )
-          + "\n"
-        )
-      }";
+      ExecStart = "${pkgs.systemd}/bin/systemd-tmpfiles --create --clean ${storageTmpfilesConf}";
+    };
+  };
+
+  systemd.services.storage-scratch-clean = {
+    description = "Evict expired files from /srv/storage/games/public/scratch (30d TTL)";
+    unitConfig.RequiresMountsFor = [ games ];
+    after = [ "storage-directories.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.systemd}/bin/systemd-tmpfiles --clean ${storageTmpfilesConf}";
+    };
+  };
+
+  systemd.timers.storage-scratch-clean = {
+    description = "Daily cleanup of 30-day expired files in public/scratch";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
     };
   };
 

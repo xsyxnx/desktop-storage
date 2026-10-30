@@ -33,7 +33,7 @@
    - **现状**：目前公共区和三个人的私人区还混在同一个 `storage/games` 数据集里（导致私人目录的小文件也被迫跟着按 `recordsize=1M`、`copies=1` 存储，且没法单独给私人目录打快照或设配额），自动快照与告警也尚未配置。
    - **你可以做的事**：
      - **数据集解耦重构**：调研将公共大文件区（`storage/public`，`recordsize=1M, copies=1`）与个人私密数据集（`storage/users/{xsy,shj,ly}`，`recordsize=128K, copies=2` 本地双副本防物理坏道，配合 `refquota` 配额）物理拆开的方案。
-     - **自动快照与自救验证**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），验证从 `.zfs/snapshot` 直接找回误删文件。
+     - **自动快照与“删库跑路”红蓝对抗演练**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），上线后我们一起做一次 5 分钟的**红蓝对抗实战测试**——故意往目录塞个文件、打快照、当面 `rm -rf` 删空，然后验证你在不借助 `root` 权限的情况下直接进 `.zfs/snapshot` 历史目录把文件完好无损拖回来。
      - **硬盘健康巡检与通知（推荐 Good Default）**：对于企业级机械盘，推荐配置**每周一次 SMART 短自检**（如周三凌晨 3 点，约 2 分钟）、**每月一次 ZFS Scrub 数据块校验**（如每月第一个周日凌晨 3 点）、**每月一次 SMART 长自检**（如每月 15 日凌晨 2 点，与 Scrub 错开两周），并挂载异常告警通知给两位管理员。请在 PR 中附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
 
 2. **Syncthing 持久同步 + 局域网类 AirDrop 投送设计（[`syncthing.nix`](./syncthing.nix)）**
@@ -73,6 +73,7 @@
 | [`syncthing.nix`](./syncthing.nix) | 跑在 `/srv/storage/sync` 的独立 Syncthing 实例（端口 `22001`，本地管理端 `127.0.0.1:8385`）。 |
 | [`nextcloud.nix`](./nextcloud.nix) | 留给你实现的 `/srv/storage/cloud` Nextcloud 模块入口。 |
 | `/srv/storage/games/public` (`1777`) | **为什么是 `1777`（`drwxrwxrwt`）？** 最高位 `1` 是粘滞位（Sticky Bit），所有人都可以在公共区建文件，但**只能删除或改名自己建的文件**，防手滑误删室友的东西；个人子目录 `0755` 实现“本人读写、别人只读”。 |
+| `/srv/storage/games/public/scratch` (`1777`, `30d`) | **30 天自动焚毁的临时空投区**：由 `systemd-tmpfiles` 原生 `30d` 策略托管，凡是临时给室友传的大包、不确定留多久的文件全扔这里，超过 30 天未访问自动静默清理，避免公共盘沦为没人敢删的陈年垃圾场。 |
 | `/srv/storage/games/private` (`0711`) | **为什么是 `0711`（`drwx--x--x`）？** 对其他人只有执行（穿过）位 `x` 没有读取位 `r`。任何人敲 `ls /srv/storage/games/private` 都会被拒绝（没法偷看有哪些私人目录），但知道自己名字就能直接 `cd /srv/storage/games/private/shj` 进自己的 `0700` 私密空间。 |
 
 ---
@@ -111,10 +112,17 @@ ssh shj@192.168.1.100
    ```
    然后在你电脑浏览器打开 `http://127.0.0.1:8385`，把你的手机或电脑 Syncthing 客户端连上去（同步端口 `22001`）试传几个文件。
 
-### 第三步：和 Agent 一起改配置、跑检查、提 PR
+### 第三步：用 `nix run` 零成本试玩新软件，再改代码提 PR
 
-1. 打开局域网代码站 `http://192.168.1.100:3000/hopper/desktop-storage`，把仓库 Clone 下来。
-2. 让你的 AI Agent 结合 [`AGENTS.md`](./AGENTS.md) 里的原则帮你改 `.nix` 配置，并在本地跑静态检查确认没写崩：
+1. **10 秒极速试玩候选软件（无需写模块、无需等部署）**：
+   因为你的主力机是 Windows，我们已经为你开通了台式机 `nix-daemon` 权限，并专门在台式机局域网防火墙放行了 **`18080–18089` 试玩端口段**。
+   当你想体验某个开源软件（比如 `filebrowser`、`copyparty`、`dufs` 等）时，不用先写复杂的 NixOS 模块，直接在台式机 SSH 里跑一条 `nix run` 就能在浏览器 `http://192.168.1.100:18080` 看真机效果：
+   ```bash
+   # 例：10 秒拉起 FileBrowser 试玩界面（按 Ctrl+C 随时退出）
+   nix run nixpkgs#filebrowser -- -a 0.0.0.0 -p 18080 -r /srv/storage/games/private/shj -d /tmp/shj-fb.db
+   ```
+2. **正式定稿写配置与本地自检**：
+   挑中满意的软件后，打开局域网代码站 `http://192.168.1.100:3000/hopper/desktop-storage` 把仓库 Clone 到 `/home/shj/desktop-storage`，让你的 AI Agent 结合 [`AGENTS.md`](./AGENTS.md) 帮你写进 `.nix` 模块，然后在台式机 SSH 里直接跑静态检查：
    ```bash
    nix flake check
    nix fmt -- *.nix
