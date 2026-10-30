@@ -40,9 +40,10 @@
 
 ## 2. `/srv/storage` 共享存储架构与权限铁律
 
-1. **机械盘冷热分离铁律（SSD 放索引/数据库，HDD 只放大块数据）**：
-   - 凡是高频随机读写的数据库（PostgreSQL、SQLite）、缓存（Redis）、服务状态与小文件索引，**必须留在系统 SSD（如 `/var/lib/nextcloud`、`/var/lib/storage-syncthing`）**。
-   - 只有真正的大体积用户数据目录（`/srv/storage/games`、`/srv/storage/sync/data`、`/srv/storage/cloud`、`/srv/storage/media`）才落到 `/srv/storage/` 机械盘上。
+1. **机械盘冷热分离铁律与具体工程实现（SSD 放索引/日志/数据库，HDD 只放大块数据）**：
+   - **物理挂载映射**：台式机根分区 `/`（含 `/var/lib/...` 与 `/var/log/...`）位于 **512GB NVMe SSD (`nvme0n1p4`)**；`/srv/storage/...` 位于 **4TB 机械盘 (`sda1`)**。
+   - **工程实现方式**：在编写 NixOS 服务模块时，保持服务的 `StateDirectory`、数据库（SQLite/PostgreSQL）、LevelDB 索引、海报缩略图缓存与 systemd journal 默认留在 `/var/lib/<service>`（即 NVMe SSD 上），**仅将服务的用户大文件载荷路径（如 `--data`、媒体库目录、下载落盘目录）指向 `/srv/storage/...`**（典型范例见 `syncthing.nix`：`--config=/var/lib/storage-syncthing` 在 SSD，`--data=/srv/storage/sync/data` 在 HDD）。
+   - **技术选型约束**：放弃臃肿的 Nextcloud PHP 全家桶；网页文件管理与外链分享优先选用轻量单二进制/标准库方案（`dufs`、`services.filebrowser` 或 `copyparty`），流媒体看片优先选用 `services.jellyfin`，异地冷备利用 20TB Google Drive 配合 `rclone crypt`（客户端加密文件内容与文件名）通过指定代理节点（RackNerd 或免费代理）夜间限速增量上传。
 2. **目录权限矩阵与设计原理**：
    - `/srv/storage/games/public` (`root:root 1777`)：最高位 `1` 为粘滞位（Sticky Bit，与 `/tmp` 同理），允许所有人在公共根下创建自己的目录/文件，但**只能删除或改名自己名下的条目**，防止误删他人文件。
    - `/srv/storage/games/public/{xsy,shj,ly}` (`本人:组 0755`，文件 `0644`)：本人可读写，其他室友只读浏览与下载，不能覆盖。

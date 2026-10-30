@@ -27,17 +27,24 @@
 
 ## 一、核心折腾方向（三大主线）
 
-1. **OpenZFS 数据集路径规划、参数调优与快照治理（[`zfs.nix`](./zfs.nix)）**
-   - **现状**：目前只建了基础数据集（`games`、`media`、`cloud`、`sync`）并挂载到 `/srv/storage/`，但还没开自动快照（Auto-Snapshot）与过期清理，数据集路径结构和参数也还可以继续打磨。
-   - **你可以做的事**：调研并设计更合理的 OpenZFS 数据集目录结构、不同业务场景下的 `recordsize`（大文件顺序读写 `1M` vs 综合网盘 `128K`）、压缩算法与每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），并在提交 PR 时附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
+1. **OpenZFS 数据集路径重构、参数调优与快照治理（[`zfs.nix`](./zfs.nix)）**
+   - **现状**：目前公共区和三个人的私人区还混在同一个 `storage/games` 数据集里（导致私人目录的小文件也被迫跟着按 `recordsize=1M`、`copies=1` 存储，且没法单独给私人目录打快照或设配额），自动快照也尚未启用。
+   - **你可以做的事**：
+     - **数据集解耦重构**：调研将公共大文件区（`storage/public`，`recordsize=1M, copies=1`）与个人私密数据集（`storage/users/{xsy,shj,ly}`，`recordsize=128K, copies=2` 本地双副本防物理坏道，配合 `refquota` 配额）物理拆开的方案。
+     - **自动快照与自救验证**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），验证从 `.zfs/snapshot` 直接找回误删文件，并在 PR 中附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
 
 2. **Syncthing 多端同步与宿舍玩法设计（[`syncthing.nix`](./syncthing.nix)）**
    - **现状**：独立实例 `storage-syncthing` 已经跑在 `/srv/storage/sync` 上（同步端口 `22001`，Web 管理端 `127.0.0.1:8385`），但具体怎么给大家用还没定型。
    - **你可以做的事**：先挂上你自己的设备试玩，构思最顺手的共享玩法（比如每人一个随手传文件的 Dropzone 目录？共同维护的资料库？多端游戏存档同步？），并把设备 ID、目录拓扑和防误删版本控制策略（Trashcan / Staggered）写进 [`syncthing.nix`](./syncthing.nix)。
 
-3. **Nextcloud 私有网盘与冷热分离架构（[`nextcloud.nix`](./nextcloud.nix)）**
-   - **现状**：`/srv/storage/cloud` 目前还是空置状态，留了模块骨架。
-   - **你可以做的事**：在 [`nextcloud.nix`](./nextcloud.nix) 中把 Nextcloud 跑起来，严格遵守下方的**机械盘冷热分离铁律**，做到网页秒开不卡顿、大文件落盘跑满带宽。
+3. **轻量网页文件分享 + Jellyfin 影音串流 + 20TB Google Drive 异地加密冷备**
+   - **现状**：经过评估，我们决定**放弃臃肿的 PHP 全家桶 Nextcloud**（杀鸡焉用牛刀，且浪费内存），拆解为真正高频的三个具体方向：
+     1. **随手网页看文件、上传与发直链**：评估对比 `dufs`（已内置）、`FileBrowser`（Go 单二进制，带账号与分享短链）或 `copyparty`（Python 极速文件服，支持断点续传与搜索），选最顺手的一个落地。
+     2. **电脑、手机、平板直接看片**：用 `services.jellyfin` 把 `/srv/storage/media` 变成局域网/Tailnet 流媒体影院。
+     3. **20TB Google Drive 自动化异地加密冷备**：我们手头有 Google AI Ultra 的 20TB 网盘空间，可配合 `rclone crypt`（本地把文件内容和文件名全加密后再上传）+ `systemd.timer` + 外部代理节点（如 RackNerd 或白嫖代理，避免占主力线路）实现夜间自动限速增量备份。
+   - **冷热分离的工程实现方法（必看）**：
+     台式机的根分区 `/`（含 `/var/lib/...` 和 `/var/log/...`）物理上挂在 **512GB NVMe 固态硬盘（`nvme0n1p4`）** 上，而 `/srv/storage/...` 物理上挂在 **4TB 机械硬盘（`sda1`）** 上。
+     因此在 NixOS 里实现“索引/日志放 SSD、大文件放机械盘”非常简单：**不要改服务的默认状态目录**（让服务的 `StateDirectory` / 数据库 / 缩略图缓存 / 日志默认留在 `/var/lib/<服务名>`，自动享受 NVMe SSD 的高 IOPS），只在配置里把**真正存大文件的媒体库或数据目录**指到 `/srv/storage/...` 即可（参考 [`syncthing.nix`](./syncthing.nix) 里 `--config=/var/lib/storage-syncthing` 在 SSD、而 `--data=/srv/storage/sync/data` 在机械盘的写法）。
 
 ---
 
