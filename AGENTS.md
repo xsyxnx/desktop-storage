@@ -43,7 +43,10 @@
 1. **机械盘冷热分离铁律与具体工程实现（SSD 放索引/日志/数据库，HDD 只放大块数据）**：
    - **物理挂载映射**：台式机根分区 `/`（含 `/var/lib/...` 与 `/var/log/...`）位于 **512GB NVMe SSD (`nvme0n1p4`)**；`/srv/storage/...` 位于 **4TB 机械盘 (`sda1`)**。
    - **工程实现方式**：在编写 NixOS 服务模块时，保持服务的 `StateDirectory`、数据库（SQLite/PostgreSQL）、LevelDB 索引、海报缩略图缓存与 systemd journal 默认留在 `/var/lib/<service>`（即 NVMe SSD 上），**仅将服务的用户大文件载荷路径（如 `--data`、媒体库目录、下载落盘目录）指向 `/srv/storage/...`**（典型范例见 `syncthing.nix`：`--config=/var/lib/storage-syncthing` 在 SSD，`--data=/srv/storage/sync/data` 在 HDD）。
-   - **技术选型约束**：放弃臃肿的 Nextcloud PHP 全家桶；网页文件管理与外链分享优先选用轻量单二进制/标准库方案（`dufs`、`services.filebrowser` 或 `copyparty`），流媒体看片优先选用 `services.jellyfin`，异地冷备利用 20TB Google Drive 配合 `rclone crypt`（客户端加密文件内容与文件名）通过指定代理节点（RackNerd 或免费代理）夜间限速增量上传。
+   - **技术选型与巡检基线（Good Defaults）**：
+     - 放弃臃肿的 Nextcloud PHP 全家桶；网页文件管理与外链分享优先选用轻量方案（可调研对比 `dufs`、`services.filebrowser`、`copyparty`、`sftpgo` 等），局域网类 AirDrop 随手互投优先考虑 `PairDrop` / `LocalSend`，流媒体看片优先选用 `services.jellyfin`。
+     - 异地冷备利用 20TB Google Drive 配合 `rclone crypt`（`XSalsa20 + Poly1305` 客户端加密文件内容与文件名）通过指定代理节点（RackNerd 或免费代理）夜间限速增量上传。
+     - 磁盘例行巡检推荐基线：每周一次 SMART 短自检（如周三 03:00）、每月一次 ZFS Scrub（如每月第一个周日 03:00）、每月一次 SMART 长自检（如每月 15 日 02:00，与 Scrub 错开半月），通过 `zed` 与 `smartd` 钩子将异常告警推送给两位管理员。
 2. **目录权限矩阵与设计原理**：
    - `/srv/storage/games/public` (`root:root 1777`)：最高位 `1` 为粘滞位（Sticky Bit，与 `/tmp` 同理），允许所有人在公共根下创建自己的目录/文件，但**只能删除或改名自己名下的条目**，防止误删他人文件。
    - `/srv/storage/games/public/{xsy,shj,ly}` (`本人:组 0755`，文件 `0644`)：本人可读写，其他室友只读浏览与下载，不能覆盖。

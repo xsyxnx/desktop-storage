@@ -10,8 +10,10 @@
 ## 零、我们要做成什么样（项目目标与“许愿池”）
 
 我们希望把这块 4TB 机械盘打造成宿舍日常最好用的数字底座。具体来说，就是解决下面这几个肉眼可见的实际需求：
-- **大文件局域网高速直传**：几百 GB 的游戏包、电影、数据集在宿舍内网随手挂载读写（目前内网路由器路径实测只有 `60 MiB/s` 左右，还没跑满机械盘 `150–200 MB/s` 的物理上限，如果你对网络调优感兴趣，这也是个现成的排查坑位）。
-- **多设备无感同步**：手机、笔记本、台式机之间像 AirDrop 一样随手互扔文件，或者自动同步游戏存档、课程资料。
+- **大文件局域网高速直传与 Steam 游戏冷车库**：几百 GB 的游戏包、电影、数据集在宿舍内网随手挂载读写。特别是 **Steam 几个月不玩的大作**，完全没必要删掉以后重下——既可以利用 **Steam 原生内置的“局域网游戏传输（Local Network Game Transfer）”**（一人下载，全宿舍 Windows/Linux 自动走内网秒拉），也可以把暂时不玩的游戏备份或移到台式机机械盘“冷车库”存着，想玩时 10 分钟移回本地 SSD（目前内网路由器路径实测只有 `60 MiB/s` 左右，还没跑满机械盘 `150–200 MB/s` 的物理上限，如果你对网络调优感兴趣，这也是个现成的排查坑位）。
+- **多设备无感同步 + 局域网类 AirDrop 随手互投**：
+  - **持续双向同步（Syncthing）**：适合笔记库、密码库、课程作业、独立游戏存档等需要多端实时保持一致的文件夹。
+  - **临时点对点空投（类 AirDrop）**：手机拍张图、截个屏或临时传个包给电脑/舍友，用 Syncthing 会很别扭；我们可以额外部署一个纯网页端的 **PairDrop**（打开局域网网页就能像 AirDrop 一样跨系统投文件和剪切板）或配合 **LocalSend**。
 - **手滑误删能自救**：配好 OpenZFS 自动快照后，哪怕不小心删空了目录或把存档改崩了，直接进 `.zfs/snapshot` 历史目录就能把几小时前或几天前的文件拖回来，不用求人恢复。
 - **现代网页网盘体验**：补齐 Samba 只能局域网挂盘的短板，有网页端预览、外链分享、手机自动备份能力。
 
@@ -27,21 +29,22 @@
 
 ## 一、核心折腾方向（三大主线）
 
-1. **OpenZFS 数据集路径重构、参数调优与快照治理（[`zfs.nix`](./zfs.nix)）**
-   - **现状**：目前公共区和三个人的私人区还混在同一个 `storage/games` 数据集里（导致私人目录的小文件也被迫跟着按 `recordsize=1M`、`copies=1` 存储，且没法单独给私人目录打快照或设配额），自动快照也尚未启用。
+1. **OpenZFS 数据集路径重构、参数调优与健康巡检（[`zfs.nix`](./zfs.nix)）**
+   - **现状**：目前公共区和三个人的私人区还混在同一个 `storage/games` 数据集里（导致私人目录的小文件也被迫跟着按 `recordsize=1M`、`copies=1` 存储，且没法单独给私人目录打快照或设配额），自动快照与告警也尚未配置。
    - **你可以做的事**：
      - **数据集解耦重构**：调研将公共大文件区（`storage/public`，`recordsize=1M, copies=1`）与个人私密数据集（`storage/users/{xsy,shj,ly}`，`recordsize=128K, copies=2` 本地双副本防物理坏道，配合 `refquota` 配额）物理拆开的方案。
-     - **自动快照与自救验证**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），验证从 `.zfs/snapshot` 直接找回误删文件，并在 PR 中附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
+     - **自动快照与自救验证**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），验证从 `.zfs/snapshot` 直接找回误删文件。
+     - **硬盘健康巡检与通知（推荐 Good Default）**：对于企业级机械盘，推荐配置**每周一次 SMART 短自检**（如周三凌晨 3 点，约 2 分钟）、**每月一次 ZFS Scrub 数据块校验**（如每月第一个周日凌晨 3 点）、**每月一次 SMART 长自检**（如每月 15 日凌晨 2 点，与 Scrub 错开两周），并挂载异常告警通知给两位管理员。请在 PR 中附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
 
-2. **Syncthing 多端同步与宿舍玩法设计（[`syncthing.nix`](./syncthing.nix)）**
-   - **现状**：独立实例 `storage-syncthing` 已经跑在 `/srv/storage/sync` 上（同步端口 `22001`，Web 管理端 `127.0.0.1:8385`），但具体怎么给大家用还没定型。
-   - **你可以做的事**：先挂上你自己的设备试玩，构思最顺手的共享玩法（比如每人一个随手传文件的 Dropzone 目录？共同维护的资料库？多端游戏存档同步？），并把设备 ID、目录拓扑和防误删版本控制策略（Trashcan / Staggered）写进 [`syncthing.nix`](./syncthing.nix)。
+2. **Syncthing 持久同步 + 局域网类 AirDrop 投送设计（[`syncthing.nix`](./syncthing.nix)）**
+   - **现状**：独立实例 `storage-syncthing` 已经跑在 `/srv/storage/sync` 上（同步端口 `22001`，Web 管理端 `127.0.0.1:8385`），但具体怎么给大家用还没定型，且缺少随手空投临时文件的工具。
+   - **你可以做的事**：构思 Syncthing 的长期共享目录拓扑（如多端存档同步、共享资料库）与防误删版本控制策略（Trashcan / Staggered）；同时调研部署 **PairDrop**（或其它局域网 AirDrop 方案），解决手机与电脑间随手甩临时文件和文本的痛点。
 
-3. **轻量网页文件分享 + Jellyfin 影音串流 + 20TB Google Drive 异地加密冷备**
+3. **网页文件分享选型 + Jellyfin 影音串流 + 20TB Google Drive 异地加密冷备**
    - **现状**：经过评估，我们决定**放弃臃肿的 PHP 全家桶 Nextcloud**（杀鸡焉用牛刀，且浪费内存），拆解为真正高频的三个具体方向：
-     1. **随手网页看文件、上传与发直链**：评估对比 `dufs`（已内置）、`FileBrowser`（Go 单二进制，带账号与分享短链）或 `copyparty`（Python 极速文件服，支持断点续传与搜索），选最顺手的一个落地。
-     2. **电脑、手机、平板直接看片**：用 `services.jellyfin` 把 `/srv/storage/media` 变成局域网/Tailnet 流媒体影院。
-     3. **20TB Google Drive 自动化异地加密冷备**：我们手头有 Google AI Ultra 的 20TB 网盘空间，可配合 `rclone crypt`（本地把文件内容和文件名全加密后再上传）+ `systemd.timer` + 外部代理节点（如 RackNerd 或白嫖代理，避免占主力线路）实现夜间自动限速增量备份。
+     1. **随手网页看文件、上传与发直链（开放选型）**：目前候选有 `dufs`（Rust 极简）、`FileBrowser`（Go 单二进制，带多账号与一键分享短链）、`copyparty`（Python 全能文件服），但**开源界说不定还有更惊艳、更趁手的轮子**（比如 `SFTPGo`、`OpenList/AList` 或其它新兴项目）——非常鼓励你自己在 GitHub、`Awesome-Selfhosted` 和 `search.nixos.org` 上搜寻对比一轮，挑出你觉得最爽的方案写进 ADR！
+     2. **电脑、手机、平板直接看片**：用 `services.jellyfin` 把 `/srv/storage/media` 变成局域网/Tailnet 流媒体影院（支持海报墙刮削、跨设备续播、显卡硬解转码）。
+     3. **20TB Google Drive 自动化异地加密冷备**：我们手头有 Google AI Ultra 的 20TB 网盘空间，可配合 `rclone crypt`（基于成熟的 `XSalsa20 + Poly1305` 标准在本地把文件内容和文件名全加密后再上传）+ `systemd.timer` + 外部代理节点（如 RackNerd 或白嫖代理，避免占主力线路）实现夜间自动限速增量备份。
    - **冷热分离的工程实现方法（必看）**：
      台式机的根分区 `/`（含 `/var/lib/...` 和 `/var/log/...`）物理上挂在 **512GB NVMe 固态硬盘（`nvme0n1p4`）** 上，而 `/srv/storage/...` 物理上挂在 **4TB 机械硬盘（`sda1`）** 上。
      因此在 NixOS 里实现“索引/日志放 SSD、大文件放机械盘”非常简单：**不要改服务的默认状态目录**（让服务的 `StateDirectory` / 数据库 / 缩略图缓存 / 日志默认留在 `/var/lib/<服务名>`，自动享受 NVMe SSD 的高 IOPS），只在配置里把**真正存大文件的媒体库或数据目录**指到 `/srv/storage/...` 即可（参考 [`syncthing.nix`](./syncthing.nix) 里 `--config=/var/lib/storage-syncthing` 在 SSD、而 `--data=/srv/storage/sync/data` 在机械盘的写法）。
