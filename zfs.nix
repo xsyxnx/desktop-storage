@@ -1,4 +1,9 @@
-{ lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   # 共享机械盘存储池 (storage) 下由本仓库接管的业务数据集
   # 实际物理盘为 4TB HGST HC310 企业级机械盘：
@@ -37,4 +42,26 @@ in
   );
 
   systemd.services.zfs-import-storage.serviceConfig.TimeoutStartSec = "90s";
+
+  # ZFS 压舱石数据集 (storage/ballast)：预留 200G 物理空间作为满盘安全气囊
+  # 防止池容量超过 90% 时 Metaslab 连续空闲块枯竭导致 CoW 写性能断崖下跌与严重碎片化
+  # 仅在数据集不存在时创建，避免覆盖管理员在紧急情况下临时调小 refreservation 的操作
+  systemd.services.storage-zfs-ballast = {
+    description = "Ensure ZFS ballast dataset (200G refreservation airbag) exists";
+    after = [ "zfs-import-storage.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ config.boot.zfs.package ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = pkgs.writeShellScript "ensure-storage-ballast" ''
+        if ! zfs list -H -o name storage >/dev/null 2>&1; then
+          exit 0
+        fi
+        if ! zfs list -H -o name storage/ballast >/dev/null 2>&1; then
+          zfs create -o mountpoint=none -o refreservation=200G storage/ballast
+        fi
+      '';
+    };
+  };
 }

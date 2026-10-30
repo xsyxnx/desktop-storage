@@ -3,7 +3,7 @@
 这份仓库专门管理宿舍台式机（`desktop`，局域网地址 `192.168.1.100`，异地 Tailscale 地址 `100.64.0.2`）上那块 4TB 企业级机械硬盘（HGST HC310）的存储与共享服务。宿主机底层的其它复杂配置已经全部剥离，这里只保留最干净的 5 个 `.nix` 文件。
 
 > **最省力的上手姿势（强烈建议）**：
-> 不用自己死记硬背 Linux 命令或从头硬啃语法。直接 SSH 登到台式机把本仓库 Clone 下来，**在仓库目录里启动你的 AI Agent（如 Codex）**。仓库根目录已经内置了 [`AGENTS.md`](./AGENTS.md)（里面写好了机器硬件参数、NixOS 模块边界、存储铁律和 Python 3.15 规范），你的 Agent 一启动就会自动读懂全貌，你可以直接用自然语言让它帮你跑探测命令、解释配置或改代码。
+> 不用自己死记硬背 Linux 命令或从头硬啃语法。直接 SSH 登到台式机把本仓库 Clone 下来，**在仓库目录里启动你的 AI Agent（如 Codex）**。仓库根目录已经内置了 [`AGENTS.md`](./AGENTS.md) 与 [`docs/`](./docs/architecture.md) 索引（写好了机器硬件参数、NixOS 模块边界、存储铁律和 Python 3.15 规范），你的 Agent 一启动就会自动读懂全貌，你可以直接用自然语言让它帮你跑探测命令、解释配置或改代码。
 
 ---
 
@@ -33,7 +33,10 @@
    - **现状**：目前公共区和三个人的私人区还混在同一个 `storage/games` 数据集里（导致私人目录的小文件也被迫跟着按 `recordsize=1M`、`copies=1` 存储，且没法单独给私人目录打快照或设配额），自动快照与告警也尚未配置。
    - **你可以做的事**：
      - **数据集解耦重构**：调研将公共大文件区（`storage/public`，`recordsize=1M, copies=1`）与个人私密数据集（`storage/users/{xsy,shj,ly}`，`recordsize=128K, copies=2` 本地双副本防物理坏道，配合 `refquota` 配额）物理拆开的方案。
-     - **自动快照与“删库跑路”红蓝对抗演练**：配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`），上线后我们一起做一次 5 分钟的**红蓝对抗实战测试**——故意往目录塞个文件、打快照、当面 `rm -rf` 删空，然后验证你在不借助 `root` 权限的情况下直接进 `.zfs/snapshot` 历史目录把文件完好无损拖回来。
+     - **自动快照、Windows 原生右键时光机与“删库跑路”红蓝对抗演练**：
+       - 配置每日/每周快照保留策略（如 `services.sanoid` 或 `services.zfs.autoSnapshot`）。
+       - **进阶联动（强烈推荐顺手配好）**：在 [`samba.nix`](./samba.nix) 中开启 `vfs objects = shadow_copy2` 并指向 `.zfs/snapshot`（具体配置见 [`docs/architecture.md`](./docs/architecture.md)）。这样你无需登 SSH，直接在 **Windows 资源管理器里对着任意文件夹右键 -> 属性 -> 以前的版本（Previous Versions）**，就能像坐时光机一样看到过去几小时、几天的历史快照并直接鼠标拖拽还原！
+       - 上线后我们一起做一次 5 分钟的**红蓝对抗实战测试**——故意往目录塞个文件、打快照、当面 `rm -rf` 删空，然后验证你在不借助 `root` 权限的情况下直接从 `.zfs/snapshot` 或 Windows 右键“以前的版本”把文件完好无损拖回来。
      - **硬盘健康巡检与通知（推荐 Good Default）**：对于企业级机械盘，推荐配置**每周一次 SMART 短自检**（如周三凌晨 3 点，约 2 分钟）、**每月一次 ZFS Scrub 数据块校验**（如每月第一个周日凌晨 3 点）、**每月一次 SMART 长自检**（如每月 15 日凌晨 2 点，与 Scrub 错开两周），并挂载异常告警通知给两位管理员。请在 PR 中附上简短的 **ADR（架构决策说明：为什么这么选、权衡了什么代价）**。
 
 2. **Syncthing 持久同步 + 局域网类 AirDrop 投送设计（[`syncthing.nix`](./syncthing.nix)）**
@@ -68,13 +71,25 @@
 | 文件 / 目录 | 作用与权限设计揭秘 |
 | --- | --- |
 | [`nixos-module.nix`](./nixos-module.nix) | 仓库总入口，同时声明了你在台式机上的个人 CLI 工具箱（`users.users.shj.packages`）。 |
-| [`zfs.nix`](./zfs.nix) | 声明 `storage` 池下各数据集在 `/srv/storage/` 的挂载点及 4 GiB ARC 内存上限。 |
-| [`samba.nix`](./samba.nix) | 声明局域网 SMB 共享盘（`\\192.168.1.100\public` 与 `private`）及 `storage-directories.service` 目录初始化。 |
+| [`zfs.nix`](./zfs.nix) | 声明 `storage` 池下各数据集在 `/srv/storage/` 的挂载点、4 GiB ARC 内存上限，以及 `storage/ballast` 压舱石数据集。 |
+| [`samba.nix`](./samba.nix) | 声明局域网 SMB 共享盘（`\\192.168.1.100\public` 与 `private`）、`veto files` 垃圾文件拦截及 `storage-directories.service` 目录初始化。 |
 | [`syncthing.nix`](./syncthing.nix) | 跑在 `/srv/storage/sync` 的独立 Syncthing 实例（端口 `22001`，本地管理端 `127.0.0.1:8385`）。 |
-| [`nextcloud.nix`](./nextcloud.nix) | 留给你实现的 `/srv/storage/cloud` Nextcloud 模块入口。 |
+| [`nextcloud.nix`](./nextcloud.nix) | 留给你实现的 `/srv/storage/cloud` 网页文件服务模块入口。 |
+| `storage/ballast` (`refreservation=200G`) | **ZFS 90% 满盘雪崩压舱石**：ZFS 容量一旦超过 80%–90%，连续空闲块（Metaslab）枯竭会导致写性能断崖下跌与严重碎片化。预留一个 200GB 的空数据集充当物理安全气囊，哪怕 `df` 显示 100% 满，ZFS 底层依然稳握 200GB 连续空闲空间；紧急时刻只需临时调小 `refreservation` 即可秒放救急空间。 |
+| Samba `veto files` | **协议层防止操作系统“拉屎”**：Windows 和 macOS 浏览图片目录时会自动拉满 `Thumbs.db`、`desktop.ini`、`.DS_Store` 等隐藏碎文件，既脏又白白消耗机械盘随机寻道 IOPS。`samba.nix` 在协议层直接拦截这些垃圾文件的创建。 |
 | `/srv/storage/games/public` (`1777`) | **为什么是 `1777`（`drwxrwxrwt`）？** 最高位 `1` 是粘滞位（Sticky Bit），所有人都可以在公共区建文件，但**只能删除或改名自己建的文件**，防手滑误删室友的东西；个人子目录 `0755` 实现“本人读写、别人只读”。 |
 | `/srv/storage/games/public/scratch` (`1777`, `30d`) | **30 天自动焚毁的临时空投区**：由 `systemd-tmpfiles` 原生 `30d` 策略托管，凡是临时给室友传的大包、不确定留多久的文件全扔这里，超过 30 天未访问自动静默清理，避免公共盘沦为没人敢删的陈年垃圾场。 |
 | `/srv/storage/games/private` (`0711`) | **为什么是 `0711`（`drwx--x--x`）？** 对其他人只有执行（穿过）位 `x` 没有读取位 `r`。任何人敲 `ls /srv/storage/games/private` 都会被拒绝（没法偷看有哪些私人目录），但知道自己名字就能直接 `cd /srv/storage/games/private/shj` 进自己的 `0700` 私密空间。 |
+
+### 4. 还可以怎么玩：高杠杆 Unix 权限小机关（供你折腾）
+
+既然上面用到了 `1777`（粘滞位）和 `0711`（可穿过不可列表），它们结合起来还能玩出两个极其巧妙的零成本机关（如果你想用，随时可以写进 [`samba.nix`](./samba.nix) 的 `storageTmpfilesConf`）：
+- **Unix `1733` (`drwx-wx-wt`) 个人盲投私密收件箱（Blind Drop-Box）**：
+  - 目前 `public/shj` 是所有人可读（`0755`），`private/shj` 是别人完全进不去（`0700`）。如果室友想单向传给你一份含身份证的报销单、成绩单或私密配置，放 `public` 会被第三个室友看见，放 `private` 他又进不去。
+  - 只需建一个 `/srv/storage/games/public/shj/inbox`，所有者设为 `shj:roommates`，权限设为 **`1733`**（去掉读权限 `r`，保留写 `w`、穿过 `x` 和防删粘滞位 `t`）。
+  - **效果**：任何人都能往你的 `inbox` 里丢文件，受粘滞位保护谁也删不掉别人的东西；而且因为没有读权限 `r`，哪怕是刚丢进文件的人自己敲 `ls` 也会被拒绝，第三人更看不见里面有什么，只有你这个目录主人拥有完整的读权限能打开收件箱！
+- **Unix `0711` (`drwx--x--x`) 免密码阅后即焚暗链目录**：
+  - 在 `0711` 目录下放一个带随机后缀的文件（如 `secret-8f9a.zip`），因为没人能 `ls` 列出目录内容，只有你口头告知了完整文件名的人才能直接拼出路径 `\\192.168.1.100\public\drop\secret-8f9a.zip` 把它拷走，相当于纯靠文件系统权限实现了免密码暗链。
 
 ---
 

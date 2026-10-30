@@ -45,6 +45,10 @@ let
     "map archive" = "no";
     "map hidden" = "no";
     "map system" = "no";
+    # 从 SMB 协议层直接拦截 Windows/macOS 资源管理器自动生成的缩略图与元数据垃圾文件
+    # 避免成千上万个零碎隐藏小文件污染目录并消耗机械盘宝贵的随机寻道 IOPS
+    "veto files" = "/Thumbs.db/desktop.ini/.DS_Store/._*/";
+    "delete veto files" = "yes";
   };
 in
 {
