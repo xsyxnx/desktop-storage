@@ -136,7 +136,6 @@ in
   };
 
   networking.firewall.extraInputRules = ''
-    iifname "enp6s0" ip saddr 192.168.1.0/24 ip daddr 192.168.1.100 tcp dport 445 accept
-    iifname "wlp5s0" ip saddr 192.168.1.0/24 ip daddr 192.168.1.110 tcp dport 445 accept
+    iifname { "enp6s0", "wlp5s0" } ip saddr 192.168.1.0/24 ip daddr { 192.168.1.100, 192.168.1.110 } tcp dport 445 accept
   '';
 }
