@@ -171,3 +171,9 @@ chmod 0644 "$state/complete-v1"
 sync -f "$state"
 # Queue consumers stopped during a live switch; their dependencies still apply.
 systemctl --no-block start storage-directories.service samba-smbd.service dufs.service storage-syncthing.service storage-scratch-clean.timer
+# Home Manager must not wait for the HDD (it precedes user logins). Restore
+# enrolled archive services asynchronously; their native mount check/restart
+# handles the short interval until the new mounts and HM config are ready.
+if systemctl is-active --quiet "user@$(id -u xsy).service"; then
+  systemctl --user --machine=xsy@.host --no-block start deltachat-archive-capture.service deltachat-archive-reader.service
+fi
