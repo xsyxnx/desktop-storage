@@ -17,6 +17,7 @@ let
       [
         "d ${games}/public 1777 root root -"
         "d ${games}/public/scratch 1777 root root 30d"
+        "d ${games}/public/depot 1777 root root -"
         "d ${games}/public/xsy 0755 xsy users -"
         "d ${games}/private 0711 root root -"
         "d ${games}/private/xsy 0700 xsy users -"

@@ -11,7 +11,7 @@
   - **共享数据盘（企业级机械盘）**：`/srv/storage/...` 位于单块 **4TB 企业级机械硬盘 `HGST HC310`**（固定设备路径 `/dev/disk/by-id/wwn-0x5000cca0bcd0aa46`），OpenZFS 存储池名为 `storage`（ARC 内存缓存上限锁定为 `4 GiB` / `4294967296` 字节）。
 - **吞吐与 IOPS 边界**：
   - 机械盘顺序读写约 `150–200 MB/s`，但**随机读写 IOPS 极低（百级），极其惧怕高频零碎小文件**。
-  - **内网 `60 MiB/s` 瓶颈实测破案**：`desktop` 有线网卡 `enp6s0` (`192.168.1.100`) 物理协商为满血 `1000Mb/s Full Duplex`。此前笔记本 (`x1c9`) 实测卡在 `60 MiB/s` 是因为笔记本走的是 5GHz Wi-Fi (`wlp0s20f3`)，使用 `iperf3` 实测单流 TCP 为 `329 Mbps`（约 `40 MiB/s`），4 并发流（`-P 4`）可达 `578–638 Mbps`（约 `68–76 MiB/s`，接近 2x2 Wi-Fi 空口物理极限）。全有线接入的台式机可跑满千兆线速（`940 Mbps` / `112 MiB/s`）。为此 [`../samba.nix`](../samba.nix) 已开启 `server multi channel support = yes`（SMB3 多通道并发）及内核 `arp_ignore=1` / `arp_announce=2`（防止同网段无线网卡 `wlp5s0` 抢答有线 IP 的 ARP 请求）。
+  - **内网 `60 MiB/s` 瓶颈实测破案**：`desktop` 有线网卡 `enp6s0` (`192.168.1.100`) 物理协商为满血 `1000Mb/s Full Duplex`。此前笔记本 (`x1c9`) 实测卡在 `60 MiB/s`，是因为宿舍路由器 (`mt3000`) 的单颗 5GHz 射频 (`radio1`) 同时承担了内网 AP (`xsys5.0`) 与校园网无线客户端 (`SYSU-SECURE` STA 中继) 双重角色，信道与频宽必须锁定跟随校园网 AP（Channel 157，`HE80` 80MHz 频宽，无法切到需要 DFS 信道且会断开校园网的 `HE160`）。在 `80MHz` 2x2 MIMO（物理握手速率 `1201 Mbps`）加单射频时分复用下，使用 `iperf3` 实测单流 TCP 为 `329 Mbps`（约 `40 MiB/s`），4 并发流（`-P 4`）达 `578–638 Mbps`（约 `68–76 MiB/s`），已经是 `HE80` 无线空口的物理极限。全有线接入路由器的设备则可跑满千兆线速（`940 Mbps` / `112 MiB/s`）。为此 [`../samba.nix`](../samba.nix) 已开启 `server multi channel support = yes`（SMB3 多通道并发）及宿主机内核 `arp_ignore=1` / `arp_announce=2`。
 - **冷热分离的 NixOS 实现方式**：
   - 编写服务模块时，**不要改动服务的默认状态目录**，让 `StateDirectory`、数据库（SQLite/PostgreSQL）、LevelDB 索引、海报缩略图缓存与 systemd journal 默认留在 `/var/lib/<service>`（即 NVMe SSD 上）。
   - **仅将服务的用户大文件载荷路径**（如 `--data`、媒体库目录、下载落盘目录）指向 `/srv/storage/...`（范例见 [`../syncthing.nix`](../syncthing.nix)：`--config=/var/lib/storage-syncthing` 在 SSD，`--data=/srv/storage/sync/data` 在 HDD）。
@@ -24,6 +24,7 @@
 
 1. **`/srv/storage/games/public` (`root:root 1777`) — Sticky Bit 防误删公共区**：
    - 最高位 `1` 为粘滞位（`drwxrwxrwt`，与 `/tmp` 同理），允许所有人在公共根下创建目录/文件，但**只能删除或改名自己名下的条目**。
+   - `/srv/storage/games/public/depot` (`root:root 1777`)：公共开发与大模型弹药库，长期存放全宿舍共享的系统镜像（ISO）、大模型权重（GGUF/safetensors）、公共数据集与大型离线安装包。
    - `/srv/storage/games/public/{xsy,shj,ly}` (`本人:组 0755`，文件 `0644`)：本人可读写，其他室友只读浏览与下载。
 2. **`/srv/storage/games/public/scratch` (`root:root 1777`, `30d` TTL) — 30 天自动焚毁空投区**：
    - 由 `storage-scratch-clean.timer` 每日调用原生 `systemd-tmpfiles --clean` 清理超过 30 天未访问的文件，解决公共网盘常见的“临时大包没人敢删、最终塞满硬盘”痛点。
