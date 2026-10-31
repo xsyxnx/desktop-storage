@@ -110,6 +110,9 @@ in
         "hosts deny" = "ALL";
         "smb ports" = "445";
         "server min protocol" = "SMB2_02";
+        # 开启 SMB3 多通道 (Multichannel)：允许 Windows 11 等客户端并发建立多条 TCP 流
+        # 榨干多队列/多网卡吞吐，并在有线 (192.168.1.100) 与无线 (192.168.1.110) 间无感故障切换
+        "server multi channel support" = "yes";
         "unix extensions" = "no";
         "smb3 unix extensions" = "no";
         "load printers" = "no";
@@ -125,6 +128,13 @@ in
   };
 
   security.wrappers."mount.cifs".enable = lib.mkForce false;
+
+  # 台式机同时在 192.168.1.0/24 网段接入了有线 (enp6s0: .100) 与无线 (wlp5s0: .110)
+  # 开启 arp_ignore=1 与 arp_announce=2 防止 Linux 默认弱主机模型导致无线网卡抢答有线 IP 的 ARP 请求
+  boot.kernel.sysctl = {
+    "net.ipv4.conf.all.arp_ignore" = 1;
+    "net.ipv4.conf.all.arp_announce" = 2;
+  };
 
   systemd.services.samba-smbd = {
     requires = [ "storage-directories.service" ];

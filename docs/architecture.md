@@ -11,7 +11,7 @@
   - **共享数据盘（企业级机械盘）**：`/srv/storage/...` 位于单块 **4TB 企业级机械硬盘 `HGST HC310`**（固定设备路径 `/dev/disk/by-id/wwn-0x5000cca0bcd0aa46`），OpenZFS 存储池名为 `storage`（ARC 内存缓存上限锁定为 `4 GiB` / `4294967296` 字节）。
 - **吞吐与 IOPS 边界**：
   - 机械盘顺序读写约 `150–200 MB/s`，但**随机读写 IOPS 极低（百级），极其惧怕高频零碎小文件**。
-  - 宿舍局域网当前受路由器转发/交换瓶颈限制，内网实测传输上限约 `60 MiB/s`（可作为独立网络调优课题排查）。
+  - **内网 `60 MiB/s` 瓶颈实测破案**：`desktop` 有线网卡 `enp6s0` (`192.168.1.100`) 物理协商为满血 `1000Mb/s Full Duplex`。此前笔记本 (`x1c9`) 实测卡在 `60 MiB/s` 是因为笔记本走的是 5GHz Wi-Fi (`wlp0s20f3`)，使用 `iperf3` 实测单流 TCP 为 `329 Mbps`（约 `40 MiB/s`），4 并发流（`-P 4`）可达 `578–638 Mbps`（约 `68–76 MiB/s`，接近 2x2 Wi-Fi 空口物理极限）。全有线接入的台式机可跑满千兆线速（`940 Mbps` / `112 MiB/s`）。为此 [`../samba.nix`](../samba.nix) 已开启 `server multi channel support = yes`（SMB3 多通道并发）及内核 `arp_ignore=1` / `arp_announce=2`（防止同网段无线网卡 `wlp5s0` 抢答有线 IP 的 ARP 请求）。
 - **冷热分离的 NixOS 实现方式**：
   - 编写服务模块时，**不要改动服务的默认状态目录**，让 `StateDirectory`、数据库（SQLite/PostgreSQL）、LevelDB 索引、海报缩略图缓存与 systemd journal 默认留在 `/var/lib/<service>`（即 NVMe SSD 上）。
   - **仅将服务的用户大文件载荷路径**（如 `--data`、媒体库目录、下载落盘目录）指向 `/srv/storage/...`（范例见 [`../syncthing.nix`](../syncthing.nix)：`--config=/var/lib/storage-syncthing` 在 SSD，`--data=/srv/storage/sync/data` 在 HDD）。
