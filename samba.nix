@@ -129,13 +129,6 @@ in
 
   security.wrappers."mount.cifs".enable = lib.mkForce false;
 
-  # 台式机同时在 192.168.1.0/24 网段接入了有线 (enp6s0: .100) 与无线 (wlp5s0: .110)
-  # 开启 arp_ignore=1 与 arp_announce=2 防止 Linux 默认弱主机模型导致无线网卡抢答有线 IP 的 ARP 请求
-  boot.kernel.sysctl = {
-    "net.ipv4.conf.all.arp_ignore" = 1;
-    "net.ipv4.conf.all.arp_announce" = 2;
-  };
-
   systemd.services.samba-smbd = {
     requires = [ "storage-directories.service" ];
     after = [ "storage-directories.service" ];
