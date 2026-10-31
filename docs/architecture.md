@@ -1,68 +1,21 @@
-# 存储架构、权限设计与技术选型参考
+# 存储架构与决策
 
-本文件记录 `desktop-storage` 的硬件拓扑、冷热分离工程实现、ZFS/Unix/Samba 经典设计机关以及服务演进基线。
+`zfs.nix` 是所有 `/srv/storage` 挂载的唯一声明源。主仓只负责池硬件、用户身份、防火墙和 host 服务。目录及配额见 [README](../README.md)，一次性状态迁移见 [migration](migration.md)。
 
----
+公开树与私人树分离，避免将 games 整体改名为 public 后泄露历史私密内容。私有用户使用独立数据集；ly/shj 的 refquota=500G 只限制当前引用的数据，不限制所有快照。xsy 无此配额。所有权继续使用宿主固定 UID/GID，旧身份未退出声明。
 
-## 1. 硬件拓扑与冷热分离工程实现
+media 与三个档案数据集使用 ZFS rename，保留内容和快照。普通目录使用 rsync，原件保留。任务明确批准一条可重试迁移服务以及一次性的媒体 go+rX，完成后以持久标记禁止重放。常规启动不扫描全盘修权限。
 
-- **物理磁盘映射**：
-  - **系统盘（NVMe SSD）**：台式机根分区 `/`（含 `/var/lib/...` 与 `/var/log/...`）位于 **512GB NVMe SSD (`nvme0n1p4`)**，具备极高的随机读写 IOPS。
-  - **共享数据盘（企业级机械盘）**：`/srv/storage/...` 位于单块 **4TB 企业级机械硬盘 `HGST HC310`**（固定设备路径 `/dev/disk/by-id/wwn-0x5000cca0bcd0aa46`），OpenZFS 存储池名为 `storage`（ARC 内存缓存上限锁定为 `4 GiB` / `4294967296` 字节）。
-- **吞吐与 IOPS 边界**：
-  - 机械盘顺序读写约 `150–200 MB/s`，但**随机读写 IOPS 极低（百级），极其惧怕高频零碎小文件**。
-  - **内网 `60 MiB/s` 瓶颈实测破案**：`desktop` 有线网卡 `enp6s0` (`192.168.1.100`) 物理协商为满血 `1000Mb/s Full Duplex`。此前笔记本 (`x1c9`) 实测卡在 `60 MiB/s`，是因为宿舍路由器 (`mt3000`) 的单颗 5GHz 射频 (`radio1`) 同时承担了内网 AP (`xsys5.0`) 与校园网无线客户端 (`SYSU-SECURE` STA 中继) 双重角色，信道与频宽必须锁定跟随校园网 AP（Channel 157，`HE80` 80MHz 频宽，无法切到需要 DFS 信道且会断开校园网的 `HE160`）。在 `80MHz` 2x2 MIMO（物理握手速率 `1201 Mbps`）加单射频时分复用下，使用 `iperf3` 实测单流 TCP 为 `329 Mbps`（约 `40 MiB/s`），4 并发流（`-P 4`）达 `578–638 Mbps`（约 `68–76 MiB/s`），已经是 `HE80` 无线空口的物理极限。全有线接入路由器的设备则可跑满千兆线速（`940 Mbps` / `112 MiB/s`）。为此 [`../samba.nix`](../samba.nix) 已开启 `server multi channel support = yes`（SMB3 多通道并发）及宿主机内核 `arp_ignore=1` / `arp_announce=2`。
-- **冷热分离的 NixOS 实现方式**：
-  - 编写服务模块时，**不要改动服务的默认状态目录**，让 `StateDirectory`、数据库（SQLite/PostgreSQL）、LevelDB 索引、海报缩略图缓存与 systemd journal 默认留在 `/var/lib/<service>`（即 NVMe SSD 上）。
-  - **仅将服务的用户大文件载荷路径**（如 `--data`、媒体库目录、下载落盘目录）指向 `/srv/storage/...`（范例见 [`../syncthing.nix`](../syncthing.nix)：`--config=/var/lib/storage-syncthing` 在 SSD，`--data=/srv/storage/sync/data` 在 HDD）。
+挂载保留 legacy，由 NixOS fileSystems 负责。noauto/nofail 避免 migration/local-fs 排序环，消费者的 RequiresMountsFor 仍会拉起它们。池离线只让依赖存储的服务失败，全局 tmpfiles 不访问机械盘。
 
----
+公共目录采用 1777 粘滞位，个人橱窗 0755，private 父项 0711、私人根 0700。Samba public/private 两个共享通过原生权限实现访问控制，禁用 wide links 和 Unix extensions。SMB3 multichannel 与现有 LAN 绑定保持。
 
-## 2. 目录权限矩阵与高杠杆存储小机关
+scratch 用原生 tmpfiles 30d 清理。public 启用 atime=on、relatime=on，让近期访问参与年龄判断；media 保持 atime=off，减少媒体读写元数据开销。默认年龄判断也考虑修改和状态时间，因此这是“旧且不再活跃”的清理，不是精确最后访问计时器。
 
-### 已落地的底层机关
+同步载荷在机械盘，配置、索引和证书在 SSD `/var/lib/storage-syncthing`。新 daemon 沿用迁来的现有配置，删除每次启动修补 XML 的 wrapper。Hub、Harmonia 密钥和所有主机日志也留在 SSD。
 
-1. **`/srv/storage/games/public` (`root:root 1777`) — Sticky Bit 防误删公共区**：
-   - 最高位 `1` 为粘滞位（`drwxrwxrwt`，与 `/tmp` 同理），允许所有人在公共根下创建目录/文件，但**只能删除或改名自己名下的条目**。
-   - `/srv/storage/games/public/depot` (`root:root 1777`)：公共开发与大模型弹药库，长期存放全宿舍共享的系统镜像（ISO）、大模型权重（GGUF/safetensors）、公共数据集与大型离线安装包。
-   - `/srv/storage/games/public/{xsy,shj,ly}` (`本人:组 0755`，文件 `0644`)：本人可读写，其他室友只读浏览与下载。
-2. **`/srv/storage/games/public/scratch` (`root:root 1777`, `30d` TTL) — 30 天自动焚毁空投区**：
-   - 由 `storage-scratch-clean.timer` 每日调用原生 `systemd-tmpfiles --clean` 清理超过 30 天未访问的文件，解决公共网盘常见的“临时大包没人敢删、最终塞满硬盘”痛点。
-3. **`/srv/storage/games/private` (`root:root 0711`) — 可穿越不可列表盲盒根目录**：
-   - `others` 仅有执行（穿过）位 `--x` 而无读取位 `r--`。任何人执行 `ls /srv/storage/games/private` 都会收到 `Permission denied`（无法窥探有哪些私人目录），但知道自己名字的用户可直接穿过该目录进入 `/srv/storage/games/private/<自己的用户名>`（`0700`，仅本人可读写）。
-4. **`storage/ballast` (`mountpoint=none`, `refreservation=200G`) — ZFS 90% 满盘雪崩压舱石**：
-   - **原理**：OpenZFS 采用写时复制（CoW）与分片区域（Metaslab）管理空间。当池容量超过 80%–90% 时，大块连续空闲空间枯竭，分配器从首次适应（First-Fit）退化为最佳适应（Best-Fit）扫描，导致严重碎片化与写性能断崖下跌。
-   - **实现**：[`../zfs.nix`](../zfs.nix) 中的 `storage-zfs-ballast.service` 声明式确保空数据集 `storage/ballast` 预留 `200G` 物理空间。哪怕池子被写到 `df` 显示 100% 满，ZFS 底层仍握有 200GB 连续物理空闲块作为安全气囊；紧急时刻管理员只需临时调小 `refreservation` 即可瞬间释放空间。
-5. **Samba `veto files` — 协议层拦截操作系统垃圾文件**：
-   - [`../samba.nix`](../samba.nix) 配置了 `veto files = /Thumbs.db/desktop.ini/.DS_Store/._*/` 与 `delete veto files = yes`，直接从 SMB 协议层阻止 Windows 资源管理器与 macOS Finder 在机械盘里生成成千上万个零碎隐藏元数据小文件，保持目录整洁并节省机械盘随机寻道 IOPS。
+ballast 的 200G refreservation 提供应急余量；迁移只在缺失时创建，已有人工调整保持。它不保证盘上恰好保留连续 200G 或利用率恒低于 90%。压缩和 recordsize 的改变只影响后续写入。
 
-### 可由协作者继续扩展的进阶机关
+主仓使用 Beszel 观测，并用原生 smartd/autoScrub 替代旧巡检状态机。快照与 Google Drive 备份仍是待办，单盘冗余元数据不是完整容灾。
 
-1. **Samba `shadow_copy2` + ZFS 快照 = Windows 原生右键“还原以前的版本”时光机**：
-   - 在配置好 `services.sanoid`（按小时/天自动生成 `.zfs/snapshot/` 快照）后，只需在 [`../samba.nix`](../samba.nix) 的共享配置中加入：
-     ```nix
-     "vfs objects" = "shadow_copy2";
-     "shadow:snapdir" = ".zfs/snapshot";
-     "shadow:sort" = "desc";
-     # 根据 sanoid 快照命名格式匹配，例如 autosnap_%Y-%m-%d_%H:%M:%S_hourly
-     "shadow:format" = "autosnap_%Y-%m-%d_%H:%M:%S_hourly";
-     "shadow:localtime" = "yes";
-     ```
-   - 效果：Windows 用户无需登录 SSH，直接在资源管理器里右键任意文件或文件夹 -> **属性 -> 以前的版本（Previous Versions）**，即可直接浏览历史快照并一键还原或拖拽恢复。
-2. **Unix `1733` (`drwx-wx-wt`) 个人盲投收件箱（Blind Drop-Box）与 `0711` 免密暗链**：
-   - **单向私密收件箱（`1733`）**：当室友之间需要传递含身份证、账单、密钥等不宜放在 `public/scratch` 被第三人看见的文件时，可创建如 `/srv/storage/games/public/xsy/inbox`（`1733 xsy:roommates`）。去掉读权限 `r` 后，任何人可往里丢文件、受粘滞位 `t` 保护谁也删不掉别人的文件，且任何人都无法 `ls` 查看箱内已有文件列表，只有目录主人 `xsy` 能读取全貌。
-   - **免密暗链目录（`0711`）**：在 `0711` 目录下放置带随机后缀的文件（如 `secret-8f9a.zip`），由于无法 `ls` 列表，只有得知完整文件名的接收者才能通过完整路径直接拉取文件。
-
----
-
-## 3. 服务选型与例行巡检基线（Good Defaults）
-
-- **轻量网页文件管理与外链分享**：放弃臃肿的 Nextcloud PHP 全家桶，优先评估单二进制/轻量方案（如 `dufs`、`services.filebrowser`、`copyparty`、`sftpgo` 等）。
-- **局域网随手互投（类 AirDrop）**：优先考虑 `PairDrop` 或 `LocalSend`。
-- **流媒体影院**：优先选用 `services.jellyfin`（管理 `/srv/storage/media`）。
-- **20TB Google Drive 异地加密冷备**：使用 `rclone crypt`（基于成熟的 `XSalsa20 + Poly1305` 标准在本地加密文件内容与文件名）配合 `systemd.timer`，通过外部代理节点（如 RackNerd 或免费代理）夜间限速增量上传。
-- **硬盘健康巡检推荐频率**：
-  - **每周一次 SMART 短自检**（如周三 `03:00`，耗时约 2 分钟）。
-  - **每月一次 ZFS Scrub 全盘校验**（如每月第一个周日 `03:00`）。
-  - **每月一次 SMART 长自检**（如每月 15 日 `02:00`，与 Scrub 错开半月避免读写叠加）。
-  - 配合 `zed` 与 `smartd` 挂载异常告警通知与每月一次的心跳摘要（Monthly Heartbeat Digest）。
+宿舍 MT3000 的 AP/STA 共用 5GHz HE80 射频限制无线吞吐。此前实测单流约 40MiB/s、并发约 68–76MiB/s；此背景不构成本次迁移的性能验收结果。

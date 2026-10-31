@@ -4,30 +4,38 @@ let
     "shj"
     "ly"
   ];
-  games = "/srv/storage/games";
-  media = "/srv/storage/media";
+  public = "/srv/storage/public";
+  private = "/srv/storage/private";
+  media = "${public}/media";
   sync = "/srv/storage/sync";
   mounts = [
-    games
+    public
+    private
+    "${private}/xsy"
+    "${private}/shj"
+    "${private}/ly"
+    "${private}/xsy/archives/deltachat"
+    "${private}/xsy/archives/cold-backups"
+    "${private}/xsy/archives/nixos-archive"
     media
     sync
   ];
   storageTmpfilesConf = pkgs.writeText "storage-directories.conf" (
     lib.concatStringsSep "\n" (
       [
-        "d ${games}/public 1777 root root -"
-        "d ${games}/public/scratch 1777 root root 30d"
-        "d ${games}/public/depot 1777 root root -"
-        "d ${games}/public/xsy 0755 xsy users -"
-        "d ${games}/private 0711 root root -"
-        "d ${games}/private/xsy 0700 xsy users -"
-        "d ${media} 0700 xsy users -"
+        "d ${public} 1777 root root -"
+        "d ${public}/scratch 1777 root root 30d"
+        "d ${public}/depot 1777 root root -"
+        "d ${public}/xsy 0755 xsy roommates -"
+        "d ${private} 0711 root root -"
+        "d ${private}/xsy 0700 xsy users -"
+        "d ${private}/xsy/archives 0700 xsy users -"
+        "d ${media} 0755 xsy roommates -"
         "d ${sync}/data 2770 storage-sync roommates -"
-        "d ${sync}/state 0700 storage-sync storage-sync -"
       ]
       ++ lib.concatMap (name: [
-        "d ${games}/public/${name} 0755 ${name} roommates -"
-        "d ${games}/private/${name} 0700 ${name} roommates -"
+        "d ${public}/${name} 0755 ${name} roommates -"
+        "d ${private}/${name} 0700 ${name} roommates -"
       ]) roommates
     )
     + "\n"
@@ -61,6 +69,9 @@ in
   # - 2770 (Setgid): 同步数据目录继承 roommates 组权限，方便组成员与同步服务协作
   systemd.services.storage-directories = {
     description = "Initialize shared storage directories with tmpfiles";
+    wantedBy = [ "multi-user.target" ];
+    requires = [ "storage-layout-migration.service" ];
+    after = [ "storage-layout-migration.service" ];
     unitConfig.RequiresMountsFor = mounts;
     before = [
       "samba-smbd.service"
@@ -70,13 +81,14 @@ in
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecStart = "${pkgs.systemd}/bin/systemd-tmpfiles --create --clean ${storageTmpfilesConf}";
+      ExecStart = "${pkgs.systemd}/bin/systemd-tmpfiles --create ${storageTmpfilesConf}";
     };
   };
 
   systemd.services.storage-scratch-clean = {
-    description = "Evict expired files from /srv/storage/games/public/scratch (30d TTL)";
-    unitConfig.RequiresMountsFor = [ games ];
+    description = "Evict expired files from /srv/storage/public/scratch (30d TTL)";
+    unitConfig.RequiresMountsFor = [ public ];
+    requires = [ "storage-directories.service" ];
     after = [ "storage-directories.service" ];
     serviceConfig = {
       Type = "oneshot";
@@ -89,7 +101,7 @@ in
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnCalendar = "daily";
-      Persistent = true;
+      Persistent = false;
     };
   };
 
@@ -120,10 +132,10 @@ in
         "disable spoolss" = "yes";
       };
       public = masks "0644" "0755" // {
-        path = "${games}/public";
+        path = "${public}";
       };
       private = masks "0600" "0700" // {
-        path = "${games}/private/%u";
+        path = "${private}/%u";
       };
     };
   };
@@ -135,7 +147,10 @@ in
     after = [ "storage-directories.service" ];
     unitConfig.RequiresMountsFor = [
       "/var/lib/samba"
-      games
+      public
+      private
+      "${private}/shj"
+      "${private}/ly"
     ];
   };
 

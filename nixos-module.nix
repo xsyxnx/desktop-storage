@@ -4,7 +4,6 @@
     ./zfs.nix
     ./samba.nix
     ./syncthing.nix
-    ./nextcloud.nix
   ];
 
   # CLI toolkit for shj on desktop. Add any needed tools from nixpkgs here

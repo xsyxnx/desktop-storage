@@ -24,7 +24,7 @@
 `shj` 已加入 `systemd-journal` 组，可在终端直接执行：
 - **内存与负载**：`free -h`、`cat /proc/meminfo`、`cat /proc/pressure/memory`、`btop`
 - **ZFS ARC 缓存命中率与水位**：`cat /proc/spl/kstat/zfs/arcstats`
-- **ZFS 数据集与挂载容量**：`zfs list -r storage`、`zfs get all storage/games`、`duf`、`df -hT`、`findmnt -t zfs`
+- **ZFS 数据集与挂载容量**：`zfs list -r storage`、`zfs get all storage/public`、`duf`、`df -hT`、`findmnt -t zfs`
 - **服务状态与日志**：`systemctl status <unit>`、`journalctl -u <unit> -n 100 --no-pager`
 
 ### 免密只读 `doas` 白名单
@@ -48,9 +48,9 @@ doas smartctl -x /dev/disk/by-id/wwn-0x5000cca0bcd0aa46
 
 ```bash
 # 例 1：在 18080 端口试玩 FileBrowser
-nix run nixpkgs#filebrowser -- -a 0.0.0.0 -p 18080 -r /srv/storage/games/private/shj -d /tmp/shj-fb.db
+nix run nixpkgs#filebrowser -- -a 0.0.0.0 -p 18080 -r /srv/storage/private/shj -d /tmp/shj-fb.db
 
 # 例 2：在 18081 端口试玩 dufs
-nix run nixpkgs#dufs -- /srv/storage/games/public -b 0.0.0.0 -p 18081 -A
+nix run nixpkgs#dufs -- /srv/storage/public -b 0.0.0.0 -p 18081 -A
 ```
 随后直接在浏览器打开 `http://192.168.1.100:18080` 即可体验真机效果。

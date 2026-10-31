@@ -1,5 +1,5 @@
 {
-  description = "Declarative storage modules for Desktop (OpenZFS mounts, Samba, Syncthing, Nextcloud)";
+  description = "Declarative storage modules for Desktop (OpenZFS mounts, Samba, Syncthing)";
 
   inputs = {
     # 与宿主机 nixos-config 保持同源：
@@ -70,20 +70,45 @@
       # 1. assert 在求值阶段验证核心服务与挂载点未被意外删改；
       # 2. 在 runCommand 中引用 ExecStart 强制触发 Nix 对整个模块树做类型与软件包求值检查，
       #    无需真正编译数 GB 的完整系统镜像即可在 1 秒内完成静态门禁校验
-      checks.${system}.eval-check =
-        assert cfg.services.samba.enable;
-        assert cfg.fileSystems ? "/srv/storage/games";
-        assert cfg.fileSystems ? "/srv/storage/cloud";
-        assert cfg.fileSystems ? "/srv/storage/sync";
-        assert cfg.fileSystems ? "/srv/storage/media";
-        assert cfg.systemd.services ? "storage-directories";
-        assert cfg.systemd.services ? "storage-zfs-ballast";
-        assert cfg.systemd.services ? "storage-syncthing";
-        pkgs.runCommand "desktop-storage-eval-check" { } ''
-          echo "${cfg.systemd.services.storage-syncthing.serviceConfig.ExecStart}" >/dev/null
-          echo "${cfg.systemd.services.storage-directories.serviceConfig.ExecStart}" >/dev/null
-          echo "${cfg.systemd.services.storage-zfs-ballast.serviceConfig.ExecStart}" >/dev/null
-          touch "$out"
-        '';
+      checks.${system} = {
+        migration =
+          pkgs.runCommand "storage-migration-fixture"
+            {
+              nativeBuildInputs = [
+                pkgs.python315
+                pkgs.rsync
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.util-linux
+                pkgs.shellcheck
+                pkgs.ruff
+              ];
+            }
+            ''
+              cp -r ${./tests} tests
+              cp ${./migrate-layout.sh} migrate-layout.sh
+              python3 -m unittest discover -s tests -v
+              shellcheck migrate-layout.sh
+              ruff check --no-cache tests
+              touch "$out"
+            '';
+
+        eval-check =
+          assert cfg.services.samba.enable;
+          assert cfg.fileSystems ? "/srv/storage/public";
+          assert cfg.fileSystems ? "/srv/storage/private/shj";
+          assert cfg.fileSystems ? "/srv/storage/sync";
+          assert cfg.fileSystems ? "/srv/storage/public/media";
+          assert cfg.systemd.services ? "storage-directories";
+          assert cfg.systemd.services ? "storage-layout-migration";
+          assert cfg.systemd.services ? "storage-syncthing";
+          pkgs.runCommand "desktop-storage-eval-check" { } ''
+            echo "${cfg.systemd.services.storage-syncthing.serviceConfig.ExecStart}" >/dev/null
+            echo "${cfg.systemd.services.storage-directories.serviceConfig.ExecStart}" >/dev/null
+            echo "${cfg.systemd.services.storage-layout-migration.serviceConfig.ExecStart}" >/dev/null
+            touch "$out"
+          '';
+      };
     };
 }
