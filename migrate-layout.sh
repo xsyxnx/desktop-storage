@@ -35,7 +35,7 @@ if systemctl is-active --quiet "user@$(id -u xsy).service"; then
 fi
 
 # A busy mount is a real error: never force/lazy unmount an unknown writer.
-for suffix in games media archives/deltachat archives/cold-backups nixos-archive sync; do
+for suffix in games media archives/deltachat archives/cold-backups sync; do
   target="/srv/storage/$suffix"
   if mountpoint -q "$target"; then
     [[ $(findmnt -rn -M "$target" -o SOURCE) == "storage/$suffix" ]] || die "unexpected source at $target"
@@ -110,7 +110,7 @@ stage_mount storage/private/ly "$stage/ly" rw
 [[ -d "$stage/games/public" && ! -L "$stage/games/public" ]] || die "invalid legacy public tree"
 [[ -d "$stage/games/private" && ! -L "$stage/games/private" ]] || die "invalid legacy private tree"
 [[ ! -L "$stage/games/private/xsy/archives" ]] || die "xsy archives is a symlink"
-for reserved in deltachat cold-backups nixos-archive legacy-games; do
+for reserved in deltachat cold-backups legacy-games; do
   [[ ! -e "$stage/games/private/xsy/archives/$reserved" && ! -L "$stage/games/private/xsy/archives/$reserved" ]] || die "legacy xsy archive name conflicts: $reserved"
 done
 copy_tree "$stage/games/public" "$stage/public"
@@ -131,7 +131,6 @@ rsync -aHAXnc --numeric-ids --itemize-changes --exclude=/public --exclude=/priva
 rename_dataset storage/media storage/public/media
 rename_dataset storage/archives/deltachat storage/private/xsy/archives/deltachat
 rename_dataset storage/archives/cold-backups storage/private/xsy/archives/cold-backups
-rename_dataset storage/nixos-archive storage/private/xsy/archives/nixos-archive
 stage_mount storage/public/media "$stage/media" rw
 # Explicitly approved one-time publication, without following symlinks.
 find "$stage/media/." -xdev ! -type l -exec chmod go+rX -- {} +
@@ -140,7 +139,7 @@ stage_mount storage/sync "$stage/sync" ro
 [[ -s "$stage/sync/state/config.xml" ]] || die "missing existing Syncthing configuration"
 copy_tree "$stage/sync/state" /var/lib/storage-syncthing
 
-for dataset in public public/media private private/xsy private/shj private/ly private/xsy/archives private/xsy/archives/deltachat private/xsy/archives/cold-backups private/xsy/archives/nixos-archive sync; do
+for dataset in public public/media private private/xsy private/shj private/ly private/xsy/archives private/xsy/archives/deltachat private/xsy/archives/cold-backups sync; do
   zfs set compression=zstd copies=1 redundant_metadata=all "storage/$dataset"
 done
 zfs set atime=on relatime=on recordsize=1M storage/public

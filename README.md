@@ -11,7 +11,7 @@
 | `storage/private` | root:root 0711 | 私人树，可穿越不可列出 |
 | `private/xsy` | xsy:users 0700，recordsize=1M | 无 refquota |
 | `private/{shj,ly}` | 本人:roommates 0700，recordsize=1M，refquota=500G | 每人独立数据集 |
-| `private/xsy/archives/{deltachat,cold-backups,nixos-archive}` | 位于 xsy 的 0700 父目录下 | 三个原数据集零拷贝改名 |
+| `private/xsy/archives/{deltachat,cold-backups}` | 位于 xsy 的 0700 父目录下 | 两个原数据集零拷贝改名 |
 | `private/xsy/archives/legacy-games` | 保留旧数字身份和权限 | library、incoming、隐藏文件及其他历史内容 |
 | `storage/sync` | recordsize=128K | 同步载荷；状态留 SSD `/var/lib/storage-syncthing` |
 | `storage/ballast` | mountpoint=none，已有 200G reservation 保持 | 满盘应急余量 |

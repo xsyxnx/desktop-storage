@@ -69,7 +69,7 @@ class Migration(unittest.TestCase):
             (self.root / name).mkdir()
         (self.root / 'mounts.json').write_text('{}')
         for ds in ['storage', 'games', 'media', 'archives/deltachat',
-                   'archives/cold-backups', 'nixos-archive', 'sync']:
+                   'archives/cold-backups', 'sync']:
             self.dataset(ds).mkdir()
         games = self.dataset('games')
         for name in ['public', 'private/xsy', 'private/shj', 'private/ly',
@@ -126,7 +126,6 @@ class Migration(unittest.TestCase):
         self.assertEqual((self.dataset('public/media') / 'movie').stat().st_mode & 0o777, 0o644)
         self.assertTrue((self.dataset('games') / 'library/.hidden').exists())
         self.assertEqual((self.root / 'ssd/key.pem').read_text(), 'fixture identity')
-        self.assertTrue(self.dataset('private/xsy/archives/nixos-archive').exists())
         # A completed migration must not replay old copies over newer user data.
         target = self.dataset('private/shj') / 'payload'
         target.write_text('new user data')
