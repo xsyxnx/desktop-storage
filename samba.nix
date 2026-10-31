@@ -30,6 +30,9 @@ let
         "d ${private} 0711 root root -"
         "d ${private}/xsy 0700 xsy users -"
         "d ${private}/xsy/archives 0700 xsy users -"
+        "d ${private}/xsy/archives/deltachat 0700 xsy users -"
+        "d ${private}/xsy/archives/cold-backups 0700 xsy users -"
+        "d ${private}/xsy/archives/logs 0700 xsy users -"
         "d ${media} 0755 xsy roommates -"
         "d ${sync}/data 2770 storage-sync roommates -"
       ]
