@@ -16,6 +16,7 @@ let
     "${private}/ly"
     "${private}/xsy/archives/deltachat"
     "${private}/xsy/archives/cold-backups"
+    "${private}/xsy/archives/logs"
     media
     sync
   ];

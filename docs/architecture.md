@@ -4,7 +4,7 @@
 
 公开树与私人树分离，避免将 games 整体改名为 public 后泄露历史私密内容。私有用户使用独立数据集；ly/shj 的 refquota=500G 只限制当前引用的数据，不限制所有快照。xsy 无此配额。所有权继续使用宿主固定 UID/GID，旧身份未退出声明。
 
-media 与两个档案数据集使用 ZFS rename，保留内容和快照。普通目录使用 rsync，原件保留。任务明确批准一条可重试迁移服务以及一次性的媒体 go+rX，完成后以持久标记禁止重放。常规启动不扫描全盘修权限。
+media 与三个档案数据集使用 ZFS rename，保留内容和快照。普通目录使用 rsync，原件保留。任务明确批准一条可重试迁移服务以及一次性的媒体 go+rX，完成后以持久标记禁止重放。常规启动不扫描全盘修权限。
 
 挂载保留 legacy，由 NixOS fileSystems 负责。noauto/nofail 避免 migration/local-fs 排序环，消费者的 RequiresMountsFor 仍会拉起它们。池离线只让依赖存储的服务失败，全局 tmpfiles 不访问机械盘。
 

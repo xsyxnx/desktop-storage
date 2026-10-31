@@ -11,7 +11,7 @@
 | `storage/private` | root:root 0711 | 私人树，可穿越不可列出 |
 | `private/xsy` | xsy:users 0700，recordsize=1M | 无 refquota |
 | `private/{shj,ly}` | 本人:roommates 0700，recordsize=1M，refquota=500G | 每人独立数据集 |
-| `private/xsy/archives/{deltachat,cold-backups}` | 位于 xsy 的 0700 父目录下 | 两个原数据集零拷贝改名 |
+| `private/xsy/archives/{deltachat,cold-backups,logs}` | 位于 xsy 的 0700 父目录下 | 三个原数据集零拷贝改名 |
 | `private/xsy/archives/legacy-games` | 保留旧数字身份和权限 | library、incoming、隐藏文件及其他历史内容 |
 | `storage/sync` | recordsize=128K | 同步载荷；状态留 SSD `/var/lib/storage-syncthing` |
 | `storage/ballast` | mountpoint=none，已有 200G reservation 保持 | 满盘应急余量 |
@@ -22,7 +22,7 @@
 
 `storage-layout-migration.service` 在第一次上线时停止旧消费者、移除旧挂载并执行迁移。新挂载用 noauto/nofail 和 service 依赖避免开机排序环；`storage-directories.service` 拉起所有活动挂载，再执行原生 tmpfiles 初始化。初始化不执行过期清理，scratch 每日 timer 的 Persistent=false，避免第一次激活补跑历史清理。
 
-`storage/games`、`storage/build-cache`、`storage/logs`、`storage/cloud` 只退出挂载配置，全部保留。脚本没有 destroy、源文件删除或 rsync --delete。`storage/archives` 空父项也保留。迁移成功只写一个完成标记，后续开机不重复拷贝和递归改权限。错误时保留源和现场。
+`storage/games`、`storage/build-cache`、`storage/cloud` 只退出挂载配置，全部保留。脚本没有 destroy、源文件删除或 rsync --delete。`storage/archives` 空父项也保留。迁移成功只写一个完成标记，后续开机不重复拷贝和递归改权限。错误时保留源和现场。
 
 详细过程、重试边界见 [自动迁移](docs/migration.md)。权限与架构见 [架构](docs/architecture.md)，只读排障见 [诊断](docs/diagnostics.md)。
 

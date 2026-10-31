@@ -31,6 +31,5 @@
       TimeoutStartSec = "infinity";
       ExecStart = "${pkgs.bash}/bin/bash ${./migrate-layout.sh}";
     };
-    restartIfChanged = false;
   };
 }
